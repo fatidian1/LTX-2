@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 import torch
+import torch.distributed as dist
 import torch.multiprocessing as mp
 
 from ltx_core.components.guiders import (
@@ -80,6 +81,34 @@ def _deserialize_quantization_policy(mode: str | None) -> QuantizationPolicy | N
 def _distributed_env_present() -> bool:
     required = ("MASTER_ADDR", "MASTER_PORT", "WORLD_SIZE", "RANK", "LOCAL_RANK")
     return all(name in os.environ for name in required)
+
+
+def _move_to_device(value: object, device: torch.device) -> object:
+    if isinstance(value, torch.Tensor):
+        return value.to(device=device)
+    if isinstance(value, list):
+        return [_move_to_device(item, device) for item in value]
+    if isinstance(value, tuple):
+        moved = tuple(_move_to_device(item, device) for item in value)
+        if hasattr(value, "_fields"):
+            return type(value)(*moved)
+        return moved
+    if isinstance(value, dict):
+        return {key: _move_to_device(item, device) for key, item in value.items()}
+    if hasattr(value, "__dict__"):
+        for key, item in vars(value).items():
+            setattr(value, key, _move_to_device(item, device))
+        return value
+    return value
+
+
+def _broadcast_from_primary(value: object | None, device: torch.device) -> object:
+    if not dist.is_initialized():
+        return value
+
+    payload = [_move_to_device(value, torch.device("cpu")) if is_primary_rank() else None]
+    dist.broadcast_object_list(payload, src=0)
+    return _move_to_device(payload[0], device)
 
 
 class TI2VidTwoStagesPipeline:
@@ -274,13 +303,16 @@ class TI2VidTwoStagesPipeline:
         noiser = GaussianNoiser(generator=generator)
         dtype = torch.bfloat16
 
-        ctx_p, ctx_n = self.prompt_encoder(
-            [prompt, negative_prompt],
-            enhance_first_prompt=enhance_prompt,
-            enhance_prompt_image=images[0][0] if len(images) > 0 else None,
-            enhance_prompt_seed=seed,
-            streaming_prefetch_count=streaming_prefetch_count,
-        )
+        prompt_contexts = None
+        if is_primary_rank():
+            prompt_contexts = self.prompt_encoder(
+                [prompt, negative_prompt],
+                enhance_first_prompt=enhance_prompt,
+                enhance_prompt_image=images[0][0] if len(images) > 0 else None,
+                enhance_prompt_seed=seed,
+                streaming_prefetch_count=streaming_prefetch_count,
+            )
+        ctx_p, ctx_n = _broadcast_from_primary(prompt_contexts, self.device)
         v_context_p, a_context_p = ctx_p.video_encoding, ctx_p.audio_encoding
         v_context_n, a_context_n = ctx_n.video_encoding, ctx_n.audio_encoding
 
@@ -291,16 +323,19 @@ class TI2VidTwoStagesPipeline:
             height=height // 2,
             fps=frame_rate,
         )
-        stage_1_conditionings = self.image_conditioner(
-            lambda enc: combined_image_conditionings(
-                images=images,
-                height=stage_1_output_shape.height,
-                width=stage_1_output_shape.width,
-                video_encoder=enc,
-                dtype=dtype,
-                device=self.device,
+        stage_1_conditionings = None
+        if is_primary_rank():
+            stage_1_conditionings = self.image_conditioner(
+                lambda enc: combined_image_conditionings(
+                    images=images,
+                    height=stage_1_output_shape.height,
+                    width=stage_1_output_shape.width,
+                    video_encoder=enc,
+                    dtype=dtype,
+                    device=self.device,
+                )
             )
-        )
+        stage_1_conditionings = _broadcast_from_primary(stage_1_conditionings, self.device)
 
         sigmas = LTX2Scheduler().execute(steps=num_inference_steps).to(dtype=torch.float32, device=self.device)
 
@@ -329,19 +364,25 @@ class TI2VidTwoStagesPipeline:
             max_batch_size=max_batch_size,
         )
 
-        upscaled_video_latent = self.upsampler(video_state.latent[:1])
+        upscaled_video_latent = None
+        if is_primary_rank():
+            upscaled_video_latent = self.upsampler(video_state.latent[:1])
+        upscaled_video_latent = _broadcast_from_primary(upscaled_video_latent, self.device)
 
         distilled_sigmas = torch.Tensor(STAGE_2_DISTILLED_SIGMA_VALUES).to(self.device)
-        stage_2_conditionings = self.image_conditioner(
-            lambda enc: combined_image_conditionings(
-                images=images,
-                height=height,
-                width=width,
-                video_encoder=enc,
-                dtype=dtype,
-                device=self.device,
+        stage_2_conditionings = None
+        if is_primary_rank():
+            stage_2_conditionings = self.image_conditioner(
+                lambda enc: combined_image_conditionings(
+                    images=images,
+                    height=height,
+                    width=width,
+                    video_encoder=enc,
+                    dtype=dtype,
+                    device=self.device,
+                )
             )
-        )
+        stage_2_conditionings = _broadcast_from_primary(stage_2_conditionings, self.device)
 
         video_state, audio_state = self.stage_2(
             denoiser=SimpleDenoiser(v_context=v_context_p, a_context=a_context_p),
@@ -364,6 +405,13 @@ class TI2VidTwoStagesPipeline:
             ),
             streaming_prefetch_count=streaming_prefetch_count,
         )
+
+        if not is_primary_rank():
+            empty_audio = Audio(
+                waveform=torch.empty((1, 1, 0), dtype=self.dtype, device=self.device),
+                sampling_rate=1,
+            )
+            return iter(()), empty_audio
 
         decoded_video = self.video_decoder(video_state.latent, tiling_config, generator)
         decoded_audio = self.audio_decoder(audio_state.latent)
