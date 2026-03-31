@@ -15,7 +15,7 @@ from ltx_core.loader import LoraPathStrengthAndSDOps
 from ltx_core.loader.registry import Registry
 from ltx_core.model.video_vae import TilingConfig, get_video_chunks_number
 from ltx_core.quantization import QuantizationPolicy
-from ltx_core.types import VideoPixelShape
+from ltx_core.types import Audio, VideoPixelShape
 from ltx_pipelines.utils.args import ImageConditioningInput, default_2_stage_arg_parser, detect_checkpoint_path
 from ltx_pipelines.utils.blocks import (
     AudioDecoder,
