@@ -39,6 +39,20 @@ from ltx_pipelines.utils.media_io import encode_video
 from ltx_pipelines.utils.types import ModalitySpec
 
 
+def _normalize_lora(
+    lora: LoraPathStrengthAndSDOps | tuple[str, float] | tuple[str, float, object],
+) -> LoraPathStrengthAndSDOps:
+    if isinstance(lora, LoraPathStrengthAndSDOps):
+        return lora
+    if len(lora) == 2:
+        path, strength = lora
+        return LoraPathStrengthAndSDOps(path, strength, None)
+    if len(lora) == 3:
+        path, strength, sd_ops = lora
+        return LoraPathStrengthAndSDOps(path, strength, sd_ops)
+    raise ValueError(f"Unsupported LoRA specification: {lora!r}")
+
+
 class TI2VidTwoStagesPipeline:
     """
     Two-stage text/image-to-video generation pipeline.
@@ -68,6 +82,8 @@ class TI2VidTwoStagesPipeline:
                 raise RuntimeError("`num_gpus` > 1 requires CUDA")
             if torch.cuda.device_count() < num_gpus:
                 raise RuntimeError(f"Requested {num_gpus} GPUs, but only {torch.cuda.device_count()} are available")
+        loras = [_normalize_lora(lora) for lora in loras]
+        distilled_lora = [_normalize_lora(lora) for lora in distilled_lora]
         self.num_gpus = num_gpus
         self.device = device or get_device()
         self.dtype = torch.bfloat16
