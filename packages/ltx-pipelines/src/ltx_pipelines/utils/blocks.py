@@ -183,6 +183,10 @@ class DiffusionStage:
         sd_ops = self._transformer_builder.model_sd_ops
         module_ops = self._transformer_builder.module_ops
         loras = self._transformer_builder.loras
+        effective_quantization = self._quantization
+        if self._num_gpus > 1 and self._quantization == QuantizationPolicy.fp8_scaled_mm():
+            logger.warning("Disabling fp8_scaled_mm for multi-GPU model parallel transformer loading")
+            effective_quantization = None
         if self._torch_compile:
             module_ops = (*module_ops, COMPILE_TRANSFORMER)
             number_of_layers = self._transformer_builder.model_config()["transformer"]["num_layers"]
@@ -197,11 +201,11 @@ class DiffusionStage:
                 )
                 for lora in loras
             )
-        if self._quantization is not None:
-            module_ops = (*module_ops, *self._quantization.module_ops)
+        if effective_quantization is not None:
+            module_ops = (*module_ops, *effective_quantization.module_ops)
             sd_ops = SDOps(
-                name=f"sd_ops_chain_{sd_ops.name}+{self._quantization.sd_ops.name}",
-                mapping=(*sd_ops.mapping, *self._quantization.sd_ops.mapping),
+                name=f"sd_ops_chain_{sd_ops.name}+{effective_quantization.sd_ops.name}",
+                mapping=(*sd_ops.mapping, *effective_quantization.sd_ops.mapping),
             )
 
         builder = self._transformer_builder.with_module_ops(module_ops).with_sd_ops(sd_ops).with_loras(loras)
