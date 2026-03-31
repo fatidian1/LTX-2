@@ -35,9 +35,27 @@ def _require_xfuser() -> tuple[object, object, object, object]:
     return get_sp_group, init_distributed_environment, initialize_model_parallel, (xFuserLongContextAttention, AttnType)
 
 
-def _build_attention(attn_type: str = "TORCH", sync_ulysses: bool = False) -> object:
+def _build_attention(attn_type: str = "FA", sync_ulysses: bool = False) -> object:
     _, _, _, (xFuserLongContextAttention, AttnType) = _require_xfuser()
-    xfuser_attention = xFuserLongContextAttention(use_sync=sync_ulysses, attn_type=AttnType[attn_type])
+    attn_aliases = {
+        "TORCH": "TORCH_EFFICIENT",
+        "PYTORCH": "TORCH_EFFICIENT",
+        "FLASH_ATTENTION": "FA",
+        "FLASH_ATTENTION_2": "FA",
+        "FLASH_ATTENTION_3": "FA3",
+    }
+    resolved_attn_type = attn_aliases.get(attn_type, attn_type)
+    try:
+        xfuser_attention = xFuserLongContextAttention(
+            use_sync=sync_ulysses,
+            attn_type=AttnType[resolved_attn_type],
+        )
+    except KeyError as exc:
+        available = ", ".join(member.name for member in AttnType)
+        raise RuntimeError(
+            f"Unsupported Ulysses attention type '{attn_type}'. "
+            f"Resolved value '{resolved_attn_type}' is not in AttnType. Available: {available}"
+        ) from exc
 
     def _attention(
         q: torch.Tensor,
@@ -74,7 +92,7 @@ def is_primary_rank() -> bool:
     return _STATE is None or _STATE.rank == 0
 
 
-def initialize_ulysses(num_gpus: int, *, attn_type: str = "TORCH", sync_ulysses: bool = False) -> UlyssesState | None:
+def initialize_ulysses(num_gpus: int, *, attn_type: str = "FA", sync_ulysses: bool = False) -> UlyssesState | None:
     global _STATE
 
     if num_gpus <= 1:
