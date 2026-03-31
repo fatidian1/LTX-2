@@ -53,9 +53,28 @@ class _PipelineInitConfig:
     loras: list[LoraPathStrengthAndSDOps]
     device: torch.device | None
     num_gpus: int
-    quantization: QuantizationPolicy | None
-    registry: Registry | None
+    quantization_mode: str | None
     torch_compile: bool
+
+
+def _serialize_quantization_policy(policy: QuantizationPolicy | None) -> str | None:
+    if policy is None:
+        return None
+    if policy == QuantizationPolicy.fp8_cast():
+        return "fp8_cast"
+    if policy == QuantizationPolicy.fp8_scaled_mm():
+        return "fp8_scaled_mm"
+    raise ValueError("Unsupported quantization policy for distributed TI2VidTwoStagesPipeline")
+
+
+def _deserialize_quantization_policy(mode: str | None) -> QuantizationPolicy | None:
+    if mode is None:
+        return None
+    if mode == "fp8_cast":
+        return QuantizationPolicy.fp8_cast()
+    if mode == "fp8_scaled_mm":
+        return QuantizationPolicy.fp8_scaled_mm()
+    raise ValueError(f"Unknown quantization mode: {mode}")
 
 
 def _distributed_env_present() -> bool:
@@ -95,8 +114,7 @@ class TI2VidTwoStagesPipeline:
             loras=list(loras),
             device=device,
             num_gpus=num_gpus,
-            quantization=quantization,
-            registry=registry,
+            quantization_mode=_serialize_quantization_policy(quantization),
             torch_compile=torch_compile,
         )
         self.num_gpus = num_gpus
@@ -146,8 +164,8 @@ class TI2VidTwoStagesPipeline:
             loras=config.loras,
             device=config.device,
             num_gpus=config.num_gpus,
-            quantization=config.quantization,
-            registry=config.registry,
+            quantization=_deserialize_quantization_policy(config.quantization_mode),
+            registry=None,
             torch_compile=config.torch_compile,
         )
 
