@@ -14,8 +14,6 @@ from typing import Callable, TypeVar
 
 import torch
 
-from ltx_core.distributed import is_ulysses_enabled
-from ltx_core.distributed.fsdp import shard_ltx_model
 from ltx_core.batch_split import BatchSplitAdapter
 from ltx_core.components.diffusion_steps import EulerDiffusionStep
 from ltx_core.components.noisers import Noiser
@@ -165,11 +163,13 @@ class DiffusionStage:
         quantization: QuantizationPolicy | None = None,
         registry: Registry | None = None,
         torch_compile: bool = False,
+        num_gpus: int = 1,
     ) -> None:
         self._dtype = dtype
         self._device = device
         self._quantization = quantization
         self._torch_compile = torch_compile
+        self._num_gpus = num_gpus
         self._transformer_builder = Builder(
             model_path=checkpoint_path,
             model_class_configurator=LTXModelConfigurator,
@@ -205,11 +205,10 @@ class DiffusionStage:
             )
 
         builder = self._transformer_builder.with_module_ops(module_ops).with_sd_ops(sd_ops).with_loras(loras)
-        if is_ulysses_enabled():
-            return X0Model(builder.build_fsdp(
-                dtype=self._dtype,
-                sharder=shard_ltx_model,
-            )).eval()
+        if self._num_gpus > 1:
+            model = builder.build(device=torch.device("cpu"), dtype=self._dtype)
+            model.enable_model_parallel([torch.device(f"cuda:{index}") for index in range(self._num_gpus)])
+            return X0Model(model).eval()
         return X0Model(builder.build(device=target, **kwargs)).to(target).eval()
 
     def _transformer_ctx(
@@ -224,7 +223,7 @@ class DiffusionStage:
                 target_device=self._device,
                 prefetch_count=streaming_prefetch_count,
             )
-        return gpu_model(self._build_transformer(**kwargs), release_to_meta=not is_ulysses_enabled())
+        return gpu_model(self._build_transformer(**kwargs))
 
     def __call__(  # noqa: PLR0913
         self,

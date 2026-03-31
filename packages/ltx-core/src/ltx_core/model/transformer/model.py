@@ -1,3 +1,4 @@
+from dataclasses import replace
 from enum import Enum
 
 import torch
@@ -72,6 +73,9 @@ class LTXModel(torch.nn.Module):
     ):
         super().__init__()
         self._enable_gradient_checkpointing = False
+        self._model_parallel_devices: list[torch.device] = []
+        self._model_parallel_slices: list[tuple[torch.device, slice]] = []
+        self._input_device = torch.device("cpu")
         self.cross_attention_adaln = cross_attention_adaln
         self.use_middle_indices_grid = use_middle_indices_grid
         self.rope_type = rope_type
@@ -123,6 +127,105 @@ class LTXModel(torch.nn.Module):
             norm_eps=norm_eps,
             attention_type=attention_type,
             apply_gated_attention=apply_gated_attention,
+        )
+
+    def enable_model_parallel(self, devices: list[torch.device]) -> None:
+        if len(devices) <= 1:
+            self._model_parallel_devices = []
+            self._model_parallel_slices = []
+            return
+        if len(self.transformer_blocks) == 0:
+            raise RuntimeError("Model parallel requires transformer blocks")
+
+        self._input_device = devices[0]
+        self._model_parallel_devices = devices
+        self._move_non_block_components(self._input_device)
+
+        blocks_per_device = (len(self.transformer_blocks) + len(devices) - 1) // len(devices)
+        self._model_parallel_slices = []
+        for index, device in enumerate(devices):
+            start = index * blocks_per_device
+            stop = min(start + blocks_per_device, len(self.transformer_blocks))
+            if start >= stop:
+                break
+            for block_index in range(start, stop):
+                self.transformer_blocks[block_index].to(device)
+            self._model_parallel_slices.append((device, slice(start, stop)))
+
+    def _move_registered_parameter(self, name: str, device: torch.device) -> None:
+        parameter = getattr(self, name, None)
+        if parameter is None:
+            return
+        setattr(self, name, torch.nn.Parameter(parameter.to(device=device), requires_grad=parameter.requires_grad))
+
+    def _move_optional_module(self, name: str, device: torch.device) -> None:
+        module = getattr(self, name, None)
+        if module is not None:
+            module.to(device)
+
+    def _move_non_block_components(self, device: torch.device) -> None:
+        for name in (
+            "patchify_proj",
+            "adaln_single",
+            "prompt_adaln_single",
+            "caption_projection",
+            "norm_out",
+            "proj_out",
+            "audio_patchify_proj",
+            "audio_adaln_single",
+            "audio_prompt_adaln_single",
+            "audio_caption_projection",
+            "audio_norm_out",
+            "audio_proj_out",
+            "av_ca_video_scale_shift_adaln_single",
+            "av_ca_audio_scale_shift_adaln_single",
+            "av_ca_a2v_gate_adaln_single",
+            "av_ca_v2a_gate_adaln_single",
+        ):
+            self._move_optional_module(name, device)
+
+        for name in (
+            "scale_shift_table",
+            "audio_scale_shift_table",
+        ):
+            self._move_registered_parameter(name, device)
+
+    def _move_transformer_args(
+        self,
+        args: TransformerArgs | None,
+        device: torch.device,
+    ) -> TransformerArgs | None:
+        if args is None:
+            return None
+        if args.x.device == device:
+            return args
+        return replace(
+            args,
+            x=args.x.to(device=device),
+            context=args.context.to(device=device),
+            context_mask=args.context_mask.to(device=device) if args.context_mask is not None else None,
+            timesteps=args.timesteps.to(device=device),
+            embedded_timestep=args.embedded_timestep.to(device=device),
+            positional_embeddings=args.positional_embeddings.to(device=device),
+            cross_positional_embeddings=(
+                args.cross_positional_embeddings.to(device=device)
+                if args.cross_positional_embeddings is not None
+                else None
+            ),
+            cross_scale_shift_timestep=(
+                args.cross_scale_shift_timestep.to(device=device)
+                if args.cross_scale_shift_timestep is not None
+                else None
+            ),
+            cross_gate_timestep=(
+                args.cross_gate_timestep.to(device=device)
+                if args.cross_gate_timestep is not None
+                else None
+            ),
+            prompt_timestep=args.prompt_timestep.to(device=device) if args.prompt_timestep is not None else None,
+            self_attention_mask=(
+                args.self_attention_mask.to(device=device) if args.self_attention_mask is not None else None
+            ),
         )
 
     @property
@@ -349,6 +452,20 @@ class LTXModel(torch.nn.Module):
         perturbations: BatchedPerturbationConfig,
     ) -> tuple[TransformerArgs, TransformerArgs]:
         """Process transformer blocks for LTXAV."""
+
+        if self._model_parallel_slices:
+            for device, block_slice in self._model_parallel_slices:
+                video = self._move_transformer_args(video, device)
+                audio = self._move_transformer_args(audio, device)
+                for block in self.transformer_blocks[block_slice]:
+                    video, audio = block(
+                        video=video,
+                        audio=audio,
+                        perturbations=perturbations,
+                    )
+            video = self._move_transformer_args(video, self._input_device)
+            audio = self._move_transformer_args(audio, self._input_device)
+            return video, audio
 
         # Process transformer blocks
         for block in self.transformer_blocks:
