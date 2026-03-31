@@ -207,6 +207,12 @@ def basic_arg_parser(
         help=f"Random seed for reproducible generation (default: {params.seed}).",
     )
     parser.add_argument(
+        "--num-gpus",
+        type=int,
+        default=1,
+        help="Number of local CUDA GPUs used for Ulysses sequence parallelism. Default: 1.",
+    )
+    parser.add_argument(
         "--lora",
         dest="lora",
         action=LoraAction,

@@ -2,6 +2,12 @@ from enum import Enum
 
 import torch
 
+from ltx_core.distributed.ulysses import (
+    gather_tensor,
+    is_ulysses_enabled,
+    shard_rotary_embeddings,
+    shard_tensor,
+)
 from ltx_core.guidance.perturbations import BatchedPerturbationConfig
 from ltx_core.model.transformer.adaln import AdaLayerNormSingle, adaln_embedding_coefficient
 from ltx_core.model.transformer.attention import AttentionCallable, AttentionFunction
@@ -401,12 +407,53 @@ class LTXModel(torch.nn.Module):
 
         video_args = self.video_args_preprocessor.prepare(video, audio) if video is not None else None
         audio_args = self.audio_args_preprocessor.prepare(audio, video) if audio is not None else None
+        video_orig_tokens = None
+        audio_orig_tokens = None
+
+        if is_ulysses_enabled():
+            if video_args is not None and video_args.self_attention_mask is not None:
+                raise ValueError("Ulysses multi-GPU does not support video self-attention masks")
+            if audio_args is not None and audio_args.self_attention_mask is not None:
+                raise ValueError("Ulysses multi-GPU does not support audio self-attention masks")
+
+            if video_args is not None:
+                video_x, video_orig_tokens = shard_tensor(video_args.x, dim=1)
+                video_timesteps, _ = shard_tensor(video_args.timesteps, dim=1)
+                video_pe, _ = shard_rotary_embeddings(video_args.positional_embeddings)
+                video_cross_pe, _ = shard_rotary_embeddings(video_args.cross_positional_embeddings)
+                video_args = replace(
+                    video_args,
+                    x=video_x,
+                    timesteps=video_timesteps,
+                    positional_embeddings=video_pe,
+                    cross_positional_embeddings=video_cross_pe,
+                )
+
+            if audio_args is not None:
+                audio_x, audio_orig_tokens = shard_tensor(audio_args.x, dim=1)
+                audio_timesteps, _ = shard_tensor(audio_args.timesteps, dim=1)
+                audio_pe, _ = shard_rotary_embeddings(audio_args.positional_embeddings)
+                audio_cross_pe, _ = shard_rotary_embeddings(audio_args.cross_positional_embeddings)
+                audio_args = replace(
+                    audio_args,
+                    x=audio_x,
+                    timesteps=audio_timesteps,
+                    positional_embeddings=audio_pe,
+                    cross_positional_embeddings=audio_cross_pe,
+                )
+
         # Process transformer blocks
         video_out, audio_out = self._process_transformer_blocks(
             video=video_args,
             audio=audio_args,
             perturbations=perturbations,
         )
+
+        if is_ulysses_enabled():
+            if video_out is not None and video_orig_tokens is not None:
+                video_out = replace(video_out, x=gather_tensor(video_out.x, video_orig_tokens, dim=1))
+            if audio_out is not None and audio_orig_tokens is not None:
+                audio_out = replace(audio_out, x=gather_tensor(audio_out.x, audio_orig_tokens, dim=1))
 
         # Process output
         vx = (

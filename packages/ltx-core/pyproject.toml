@@ -13,6 +13,8 @@ dependencies = [
     "safetensors",
     "accelerate",
     "scipy>=1.14",
+    "xfuser>=0.3.3",
+    "yunchang>=0.6.0",
 ]
 
 [project.optional-dependencies]

@@ -248,9 +248,9 @@ name = "anyio"
 version = "4.12.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
+    { name = "exceptiongroup", marker = "python_full_version < '3.11' or (extra == 'extra-8-ltx-core-fp8-trtllm' and extra == 'extra-8-ltx-core-xformers')" },
     { name = "idna" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'extra-8-ltx-core-fp8-trtllm' and extra == 'extra-8-ltx-core-xformers')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/96/f0/5eb65b2bb0d09ac6776f2eb54adee6abe8228ea05b20a5ad0e4945de8aac/anyio-4.12.1.tar.gz", hash = "sha256:41cfcc3a4c85d3f05c932da7c26d0201ac36f72abd4435ba90d0464a3ffed703", size = 228685, upload-time = "2026-01-06T11:45:21.246Z" }
 wheels = [
@@ -339,6 +339,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/47/d7/5bbeb12c44d7c4f2fb5b56abce497eb5ed9f34d85701de869acedd602619/backoff-2.2.1.tar.gz", hash = "sha256:03f829f5bb1923180821643f8753b0502c3b682293992485b0eef2807afa5cba", size = 17001, upload-time = "2022-10-05T19:19:32.061Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/df/73/b6e24bd22e6720ca8ee9a85a0c4a2971af8497d8f3193fa05390cbd46e09/backoff-2.2.1-py3-none-any.whl", hash = "sha256:63579f9a0628e06278f7e47b7d7d5b6ce20dc65c5e96a6f3ca99a6adca0396e8", size = 15148, upload-time = "2022-10-05T19:19:30.546Z" },
+]
+
+[[package]]
+name = "beautifulsoup4"
+version = "4.14.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "soupsieve" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c3/b0/1c6a16426d389813b48d95e26898aff79abbde42ad353958ad95cc8c9b21/beautifulsoup4-4.14.3.tar.gz", hash = "sha256:6292b1c5186d356bba669ef9f7f051757099565ad9ada5dd630bd9de5fa7fb86", size = 627737, upload-time = "2025-11-30T15:08:26.084Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1a/39/47f9197bdd44df24d67ac8893641e16f386c984a0619ef2ee4c51fbbc019/beautifulsoup4-4.14.3-py3-none-any.whl", hash = "sha256:0918bfe44902e6ad8d57732ba310582e98da931428d231a5ecb9e7c703a735bb", size = 107721, upload-time = "2025-11-30T15:08:24.087Z" },
 ]
 
 [[package]]
@@ -1057,8 +1070,11 @@ dependencies = [
     { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "importlib-metadata" },
-    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" } },
-    { name = "pillow", version = "10.3.0", source = { registry = "https://pypi.org/simple" } },
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-fp8-trtllm'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and extra != 'extra-8-ltx-core-fp8-trtllm') or (extra == 'extra-8-ltx-core-fp8-trtllm' and extra == 'extra-8-ltx-core-xformers')" },
+    { name = "numpy", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.11' and extra != 'extra-8-ltx-core-fp8-trtllm') or (extra == 'extra-8-ltx-core-fp8-trtllm' and extra == 'extra-8-ltx-core-xformers')" },
+    { name = "pillow", version = "10.3.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-fp8-trtllm'" },
+    { name = "pillow", version = "12.1.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-xformers' or extra != 'extra-8-ltx-core-fp8-trtllm'" },
     { name = "regex" },
     { name = "requests" },
     { name = "safetensors" },
@@ -1093,6 +1109,22 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fc/f8/98eea607f65de6527f8a2e8885fc8015d3e6f5775df186e443e0964a11c3/distro-1.9.0.tar.gz", hash = "sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed", size = 60722, upload-time = "2023-12-24T09:54:32.31Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/12/b3/231ffd4ab1fc9d679809f356cebee130ac7daa00d6d6f3206dd4fd137e9e/distro-1.9.0-py3-none-any.whl", hash = "sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2", size = 20277, upload-time = "2023-12-24T09:54:30.421Z" },
+]
+
+[[package]]
+name = "distvae"
+version = "0.0.0b5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "diffusers" },
+    { name = "torch", version = "2.7.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-fp8-trtllm'" },
+    { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-xformers' or extra != 'extra-8-ltx-core-fp8-trtllm'" },
+    { name = "transformers", version = "4.53.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-fp8-trtllm'" },
+    { name = "transformers", version = "4.57.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-xformers' or extra != 'extra-8-ltx-core-fp8-trtllm'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5d/d4/dcd2901874d54745512b7e8a45abc9ea555057935deda5228e33a250c026/distvae-0.0.0b5.tar.gz", hash = "sha256:4376467ed2b7d6e9e7cab0bc174e49f1771535d07eaa8d2a86ef6f537e2977f6", size = 25068, upload-time = "2025-01-23T10:08:17.677Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2b/0b/25ad7947573cb7e6e5b5443aa5f93ebc8e43ba4f535bb38e08914473b175/DistVAE-0.0.0b5-py3-none-any.whl", hash = "sha256:e0a7e302ba0935251086b788a95cc971602698b9743eb36ed4ca910ddaf286bb", size = 28653, upload-time = "2025-01-23T10:08:15.844Z" },
 ]
 
 [[package]]
@@ -2080,6 +2112,8 @@ dependencies = [
     { name = "torchaudio", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-xformers' or extra != 'extra-8-ltx-core-fp8-trtllm'" },
     { name = "transformers", version = "4.53.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-fp8-trtllm'" },
     { name = "transformers", version = "4.57.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-xformers' or extra != 'extra-8-ltx-core-fp8-trtllm'" },
+    { name = "xfuser" },
+    { name = "yunchang" },
 ]
 
 [package.optional-dependencies]
@@ -2113,6 +2147,8 @@ requires-dist = [
     { name = "torchaudio" },
     { name = "transformers", specifier = ">=4.52" },
     { name = "xformers", marker = "extra == 'xformers'", index = "https://download.pytorch.org/whl/cu129" },
+    { name = "xfuser", specifier = ">=0.3.3" },
+    { name = "yunchang", specifier = ">=0.6.0" },
 ]
 provides-extras = ["xformers", "fp8-trtllm"]
 
@@ -5935,6 +5971,15 @@ wheels = [
 ]
 
 [[package]]
+name = "soupsieve"
+version = "2.8.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7b/ae/2d9c981590ed9999a0d91755b47fc74f74de286b0f5cee14c9269041e6c4/soupsieve-2.8.3.tar.gz", hash = "sha256:3267f1eeea4251fb42728b6dfb746edc9acaffc4a45b27e19450b676586e8349", size = 118627, upload-time = "2026-01-20T04:27:02.457Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/2c/1462b1d0a634697ae9e55b3cecdcb64788e8b7d63f54d923fcd0bb140aed/soupsieve-2.8.3-py3-none-any.whl", hash = "sha256:ed64f2ba4eebeab06cc4962affce381647455978ffc1e36bb79a545b91f45a95", size = 37016, upload-time = "2026-01-20T04:27:01.012Z" },
+]
+
+[[package]]
 name = "starlette"
 version = "0.41.3"
 source = { registry = "https://pypi.org/simple" }
@@ -7009,6 +7054,28 @@ wheels = [
 ]
 
 [[package]]
+name = "xfuser"
+version = "0.4.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "accelerate" },
+    { name = "beautifulsoup4" },
+    { name = "diffusers" },
+    { name = "distvae" },
+    { name = "einops" },
+    { name = "sentencepiece" },
+    { name = "torch", version = "2.7.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-fp8-trtllm'" },
+    { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-xformers' or extra != 'extra-8-ltx-core-fp8-trtllm'" },
+    { name = "transformers", version = "4.53.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-fp8-trtllm'" },
+    { name = "transformers", version = "4.57.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-xformers' or extra != 'extra-8-ltx-core-fp8-trtllm'" },
+    { name = "yunchang" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/52/4f94d1348275009a284e347e0a429864ba6757b8b2eca9781cf6f77ef14c/xfuser-0.4.5.tar.gz", hash = "sha256:bfd985b9a2f27bc541fc71e6a224bcdbfd945a25ead7e89976ced1ea63bc3e64", size = 184100, upload-time = "2025-11-12T13:42:24.243Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/54/444f7b06dcf35486847c05e0b109884e46de01fad769193facb43ec354d8/xfuser-0.4.5-py3-none-any.whl", hash = "sha256:6d660a733f9f96c06be48dd9d4cbb17b29d133a0288939c95adeb1a2beff5b5d", size = 241359, upload-time = "2025-11-12T13:42:23.155Z" },
+]
+
+[[package]]
 name = "xgrammar"
 version = "0.1.21"
 source = { registry = "https://pypi.org/simple" }
@@ -7284,6 +7351,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f9/86/0f0dccb6e59a9e7f122c5afd43568b1d31b8ab7dda5f1b01fb5c7025c9a9/yarl-1.22.0-cp314-cp314t-win_amd64.whl", hash = "sha256:9fb17ea16e972c63d25d4a97f016d235c78dd2344820eb35bc034bc32012ee27", size = 96292, upload-time = "2025-10-06T14:12:15.398Z" },
     { url = "https://files.pythonhosted.org/packages/48/b7/503c98092fb3b344a179579f55814b613c1fbb1c23b3ec14a7b008a66a6e/yarl-1.22.0-cp314-cp314t-win_arm64.whl", hash = "sha256:9f6d73c1436b934e3f01df1e1b21ff765cd1d28c77dfb9ace207f746d4610ee1", size = 85171, upload-time = "2025-10-06T14:12:16.935Z" },
     { url = "https://files.pythonhosted.org/packages/73/ae/b48f95715333080afb75a4504487cbe142cae1268afc482d06692d605ae6/yarl-1.22.0-py3-none-any.whl", hash = "sha256:1380560bdba02b6b6c90de54133c81c9f2a453dee9912fe58c1dcced1edb7cff", size = 46814, upload-time = "2025-10-06T14:12:53.872Z" },
+]
+
+[[package]]
+name = "yunchang"
+version = "0.6.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "torch", version = "2.7.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-fp8-trtllm'" },
+    { name = "torch", version = "2.9.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-ltx-core-xformers' or extra != 'extra-8-ltx-core-fp8-trtllm'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f9/aa/307ef822c4dcd225658fa7a19b1986d6f7ed0c9600e3af0d81574a0bab5f/yunchang-0.6.4.tar.gz", hash = "sha256:9493ba28cd0f0daa3871f0c80a4876b866ead5db48e475708569d476804736f4", size = 40103, upload-time = "2026-01-13T08:14:19.5Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/77/9395c44f515dbabbd465f71dfd2026d1e523febb2ba2e65e41a32cdaa5e4/yunchang-0.6.4-py3-none-any.whl", hash = "sha256:cce4295058e9de2c0592d69cfe1e3e679711def5f315fd1b68dbed2d54bc9255", size = 55254, upload-time = "2026-01-13T08:14:18.439Z" },
 ]
 
 [[package]]

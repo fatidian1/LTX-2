@@ -45,6 +45,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 attention_function=attention_function,
                 apply_gated_attention=video.apply_gated_attention,
             )
+            self.attn1.ulysses_mode = "self"
             self.attn2 = Attention(
                 query_dim=video.dim,
                 context_dim=video.context_dim,
@@ -55,6 +56,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 attention_function=attention_function,
                 apply_gated_attention=video.apply_gated_attention,
             )
+            self.attn2.ulysses_mode = "text_cross"
             self.ff = FeedForward(video.dim, dim_out=video.dim)
             video_sst_size = adaln_embedding_coefficient(video.cross_attention_adaln)
             self.scale_shift_table = torch.nn.Parameter(torch.empty(video_sst_size, video.dim))
@@ -70,6 +72,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 attention_function=attention_function,
                 apply_gated_attention=audio.apply_gated_attention,
             )
+            self.audio_attn1.ulysses_mode = "self"
             self.audio_attn2 = Attention(
                 query_dim=audio.dim,
                 context_dim=audio.context_dim,
@@ -80,6 +83,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 attention_function=attention_function,
                 apply_gated_attention=audio.apply_gated_attention,
             )
+            self.audio_attn2.ulysses_mode = "text_cross"
             self.audio_ff = FeedForward(audio.dim, dim_out=audio.dim)
             audio_sst_size = adaln_embedding_coefficient(audio.cross_attention_adaln)
             self.audio_scale_shift_table = torch.nn.Parameter(torch.empty(audio_sst_size, audio.dim))
@@ -96,6 +100,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 attention_function=attention_function,
                 apply_gated_attention=video.apply_gated_attention,
             )
+            self.audio_to_video_attn.ulysses_mode = "multimodal_cross"
 
             # Q: Audio, K,V: Video
             self.video_to_audio_attn = Attention(
@@ -108,6 +113,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 attention_function=attention_function,
                 apply_gated_attention=audio.apply_gated_attention,
             )
+            self.video_to_audio_attn.ulysses_mode = "multimodal_cross"
 
             self.scale_shift_table_a2v_ca_audio = torch.nn.Parameter(torch.empty(5, audio.dim))
             self.scale_shift_table_a2v_ca_video = torch.nn.Parameter(torch.empty(5, video.dim))

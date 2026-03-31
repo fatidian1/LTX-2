@@ -1,7 +1,11 @@
+import argparse
 import logging
+import os
+import socket
 from collections.abc import Iterator
 
 import torch
+import torch.multiprocessing as mp
 
 from ltx_core.components.guiders import (
     MultiModalGuiderFactory,
@@ -10,6 +14,7 @@ from ltx_core.components.guiders import (
 )
 from ltx_core.components.noisers import GaussianNoiser
 from ltx_core.components.schedulers import LTX2Scheduler
+from ltx_core.distributed import destroy_ulysses, initialize_ulysses, is_primary_rank
 from ltx_core.loader import LoraPathStrengthAndSDOps
 from ltx_core.loader.registry import Registry
 from ltx_core.model.video_vae import TilingConfig, get_video_chunks_number
@@ -55,10 +60,14 @@ class TI2VidTwoStagesPipeline:
         gemma_root: str,
         loras: list[LoraPathStrengthAndSDOps],
         device: torch.device | None = None,
+        num_gpus: int = 1,
         quantization: QuantizationPolicy | None = None,
         registry: Registry | None = None,
         torch_compile: bool = False,
     ):
+        if num_gpus < 1:
+            raise ValueError("`num_gpus` must be >= 1")
+        initialize_ulysses(num_gpus)
         self.device = device or get_device()
         self.dtype = torch.bfloat16
 
@@ -211,22 +220,21 @@ class TI2VidTwoStagesPipeline:
         return decoded_video, decoded_audio
 
 
-@torch.inference_mode()
-def main() -> None:
-    logging.getLogger().setLevel(logging.INFO)
-    checkpoint_path = detect_checkpoint_path()
-    params = detect_params(checkpoint_path)
-    parser = default_2_stage_arg_parser(params=params)
-    args = parser.parse_args()
-    pipeline = TI2VidTwoStagesPipeline(
+def _build_pipeline_from_args(args: argparse.Namespace) -> TI2VidTwoStagesPipeline:
+    return TI2VidTwoStagesPipeline(
         checkpoint_path=args.checkpoint_path,
         distilled_lora=args.distilled_lora,
         spatial_upsampler_path=args.spatial_upsampler_path,
         gemma_root=args.gemma_root,
         loras=tuple(args.lora) if args.lora else (),
+        num_gpus=args.num_gpus,
         quantization=args.quantization,
         torch_compile=args.compile,
     )
+
+
+def _run_pipeline(args: argparse.Namespace) -> None:
+    pipeline = _build_pipeline_from_args(args)
     tiling_config = TilingConfig.default()
     video_chunks_number = get_video_chunks_number(args.num_frames, tiling_config)
     video, audio = pipeline(
@@ -260,13 +268,51 @@ def main() -> None:
         max_batch_size=args.max_batch_size,
     )
 
-    encode_video(
-        video=video,
-        fps=args.frame_rate,
-        audio=audio,
-        output_path=args.output_path,
-        video_chunks_number=video_chunks_number,
-    )
+    if is_primary_rank():
+        encode_video(
+            video=video,
+            fps=args.frame_rate,
+            audio=audio,
+            output_path=args.output_path,
+            video_chunks_number=video_chunks_number,
+        )
+
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _distributed_worker(local_rank: int, args: argparse.Namespace) -> None:
+    os.environ["LOCAL_RANK"] = str(local_rank)
+    os.environ["RANK"] = str(local_rank)
+    os.environ["WORLD_SIZE"] = str(args.num_gpus)
+    torch.cuda.set_device(local_rank)
+    try:
+        _run_pipeline(args)
+    finally:
+        destroy_ulysses()
+
+
+@torch.inference_mode()
+def main() -> None:
+    logging.getLogger().setLevel(logging.INFO)
+    checkpoint_path = detect_checkpoint_path()
+    params = detect_params(checkpoint_path)
+    parser = default_2_stage_arg_parser(params=params)
+    args = parser.parse_args()
+    if args.num_gpus > 1:
+        if not torch.cuda.is_available():
+            raise RuntimeError("`--num-gpus` > 1 requires CUDA")
+        if torch.cuda.device_count() < args.num_gpus:
+            raise RuntimeError(f"Requested {args.num_gpus} GPUs, but only {torch.cuda.device_count()} are available")
+        os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+        os.environ.setdefault("MASTER_PORT", str(_find_free_port()))
+        mp.spawn(_distributed_worker, nprocs=args.num_gpus, args=(args,), join=True)
+        return
+
+    _run_pipeline(args)
 
 
 if __name__ == "__main__":
