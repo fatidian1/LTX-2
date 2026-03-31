@@ -88,9 +88,19 @@ def initialize_ulysses(num_gpus: int, *, attn_type: str = "TORCH", sync_ulysses:
     if not torch.cuda.is_available():
         raise RuntimeError("Ulysses multi-GPU requires CUDA")
 
+    missing_env = [
+        name for name in ("MASTER_ADDR", "MASTER_PORT", "WORLD_SIZE", "RANK", "LOCAL_RANK") if name not in os.environ
+    ]
+    if not dist.is_initialized() and missing_env:
+        raise RuntimeError(
+            "Ulysses multi-GPU requires a distributed launcher context. "
+            f"Missing environment variables: {', '.join(missing_env)}. "
+            "Use the CLI entrypoint with `--num-gpus N`, `torchrun`, or your own `torch.multiprocessing.spawn` setup."
+        )
+
     world_size = int(os.environ.get("WORLD_SIZE", num_gpus))
-    rank = int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0")))
-    local_rank = int(os.environ.get("LOCAL_RANK", rank))
+    rank = int(os.environ["RANK"])
+    local_rank = int(os.environ["LOCAL_RANK"])
     if world_size != num_gpus:
         raise RuntimeError(f"Expected WORLD_SIZE={num_gpus} for Ulysses, got {world_size}")
 

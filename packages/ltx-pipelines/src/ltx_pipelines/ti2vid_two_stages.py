@@ -3,6 +3,7 @@ import logging
 import os
 import socket
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 import torch
 import torch.multiprocessing as mp
@@ -43,6 +44,25 @@ from ltx_pipelines.utils.media_io import encode_video
 from ltx_pipelines.utils.types import ModalitySpec
 
 
+@dataclass(frozen=True)
+class _PipelineInitConfig:
+    checkpoint_path: str
+    distilled_lora: list[LoraPathStrengthAndSDOps]
+    spatial_upsampler_path: str
+    gemma_root: str
+    loras: list[LoraPathStrengthAndSDOps]
+    device: torch.device | None
+    num_gpus: int
+    quantization: QuantizationPolicy | None
+    registry: Registry | None
+    torch_compile: bool
+
+
+def _distributed_env_present() -> bool:
+    required = ("MASTER_ADDR", "MASTER_PORT", "WORLD_SIZE", "RANK", "LOCAL_RANK")
+    return all(name in os.environ for name in required)
+
+
 class TI2VidTwoStagesPipeline:
     """
     Two-stage text/image-to-video generation pipeline.
@@ -67,7 +87,20 @@ class TI2VidTwoStagesPipeline:
     ):
         if num_gpus < 1:
             raise ValueError("`num_gpus` must be >= 1")
-        initialize_ulysses(num_gpus)
+        self._init_config = _PipelineInitConfig(
+            checkpoint_path=checkpoint_path,
+            distilled_lora=list(distilled_lora),
+            spatial_upsampler_path=spatial_upsampler_path,
+            gemma_root=gemma_root,
+            loras=list(loras),
+            device=device,
+            num_gpus=num_gpus,
+            quantization=quantization,
+            registry=registry,
+            torch_compile=torch_compile,
+        )
+        self.num_gpus = num_gpus
+        self._ulysses_initialized = False
         self.device = device or get_device()
         self.dtype = torch.bfloat16
 
@@ -98,7 +131,108 @@ class TI2VidTwoStagesPipeline:
             torch_compile=torch_compile,
         )
 
-    def __call__(  # noqa: PLR0913
+    def _ensure_ulysses_initialized(self) -> None:
+        if self.num_gpus > 1 and not self._ulysses_initialized:
+            initialize_ulysses(self.num_gpus)
+            self._ulysses_initialized = True
+
+    @classmethod
+    def _from_init_config(cls, config: _PipelineInitConfig) -> "TI2VidTwoStagesPipeline":
+        return cls(
+            checkpoint_path=config.checkpoint_path,
+            distilled_lora=config.distilled_lora,
+            spatial_upsampler_path=config.spatial_upsampler_path,
+            gemma_root=config.gemma_root,
+            loras=config.loras,
+            device=config.device,
+            num_gpus=config.num_gpus,
+            quantization=config.quantization,
+            registry=config.registry,
+            torch_compile=config.torch_compile,
+        )
+
+    @staticmethod
+    def _distributed_child_worker(
+        local_rank: int,
+        master_addr: str,
+        master_port: str,
+        init_config: _PipelineInitConfig,
+        call_kwargs: dict,
+        result_queue: mp.SimpleQueue,
+    ) -> None:
+        os.environ["MASTER_ADDR"] = master_addr
+        os.environ["MASTER_PORT"] = master_port
+        os.environ["WORLD_SIZE"] = str(init_config.num_gpus)
+        os.environ["RANK"] = str(local_rank)
+        os.environ["LOCAL_RANK"] = str(local_rank)
+        torch.cuda.set_device(local_rank)
+
+        try:
+            pipeline = TI2VidTwoStagesPipeline._from_init_config(init_config)
+            video, audio = pipeline._run_local_call(call_kwargs)
+            if local_rank == 0:
+                video_chunks = [chunk.detach().cpu().contiguous() for chunk in video]
+                payload = {
+                    "video_chunks": video_chunks,
+                    "audio_waveform": audio.waveform.detach().cpu().contiguous(),
+                    "audio_sampling_rate": audio.sampling_rate,
+                }
+                result_queue.put(payload)
+        except Exception as exc:
+            result_queue.put({"error": f"rank {local_rank}: {exc}"})
+            raise
+        finally:
+            destroy_ulysses()
+
+    def _run_distributed_call(self, call_kwargs: dict) -> tuple[Iterator[torch.Tensor], Audio]:
+        if not torch.cuda.is_available():
+            raise RuntimeError("`num_gpus` > 1 requires CUDA")
+        if torch.cuda.device_count() < self.num_gpus:
+            raise RuntimeError(f"Requested {self.num_gpus} GPUs, but only {torch.cuda.device_count()} are available")
+
+        master_addr = "127.0.0.1"
+        master_port = str(_find_free_port())
+        ctx = mp.get_context("spawn")
+        result_queue: mp.SimpleQueue = ctx.SimpleQueue()
+        processes: list[mp.Process] = []
+
+        for local_rank in range(self.num_gpus):
+            process = ctx.Process(
+                target=TI2VidTwoStagesPipeline._distributed_child_worker,
+                args=(
+                    local_rank,
+                    master_addr,
+                    master_port,
+                    self._init_config,
+                    call_kwargs,
+                    result_queue,
+                ),
+            )
+            process.start()
+            processes.append(process)
+
+        result = result_queue.get()
+
+        for process in processes:
+            process.join()
+            if process.exitcode != 0 and "error" not in result:
+                raise RuntimeError(f"LTX distributed worker exited with code {process.exitcode}")
+
+        if "error" in result:
+            raise RuntimeError(result["error"])
+
+        video_chunks = result["video_chunks"]
+        audio = Audio(
+            waveform=result["audio_waveform"],
+            sampling_rate=result["audio_sampling_rate"],
+        )
+        return iter(video_chunks), audio
+
+    def _run_local_call(self, call_kwargs: dict) -> tuple[Iterator[torch.Tensor], Audio]:
+        self._ensure_ulysses_initialized()
+        return self._call_impl(**call_kwargs)
+
+    def _call_impl(  # noqa: PLR0913
         self,
         prompt: str,
         negative_prompt: str,
@@ -132,7 +266,6 @@ class TI2VidTwoStagesPipeline:
         v_context_p, a_context_p = ctx_p.video_encoding, ctx_p.audio_encoding
         v_context_n, a_context_n = ctx_n.video_encoding, ctx_n.audio_encoding
 
-        # Stage 1: Generate video at half resolution with CFG guidance.
         stage_1_output_shape = VideoPixelShape(
             batch=1,
             frames=num_frames,
@@ -178,7 +311,6 @@ class TI2VidTwoStagesPipeline:
             max_batch_size=max_batch_size,
         )
 
-        # Stage 2: Upsample and refine the video at higher resolution with distilled LoRA.
         upscaled_video_latent = self.upsampler(video_state.latent[:1])
 
         distilled_sigmas = torch.Tensor(STAGE_2_DISTILLED_SIGMA_VALUES).to(self.device)
@@ -218,6 +350,48 @@ class TI2VidTwoStagesPipeline:
         decoded_video = self.video_decoder(video_state.latent, tiling_config, generator)
         decoded_audio = self.audio_decoder(audio_state.latent)
         return decoded_video, decoded_audio
+
+    @torch.inference_mode()
+    def __call__(  # noqa: PLR0913
+        self,
+        prompt: str,
+        negative_prompt: str,
+        seed: int,
+        height: int,
+        width: int,
+        num_frames: int,
+        frame_rate: float,
+        num_inference_steps: int,
+        video_guider_params: MultiModalGuiderParams | MultiModalGuiderFactory,
+        audio_guider_params: MultiModalGuiderParams | MultiModalGuiderFactory,
+        images: list[ImageConditioningInput],
+        tiling_config: TilingConfig | None = None,
+        enhance_prompt: bool = False,
+        streaming_prefetch_count: int | None = None,
+        max_batch_size: int = 1,
+    ) -> tuple[Iterator[torch.Tensor], Audio]:
+        call_kwargs = {
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "seed": seed,
+            "height": height,
+            "width": width,
+            "num_frames": num_frames,
+            "frame_rate": frame_rate,
+            "num_inference_steps": num_inference_steps,
+            "video_guider_params": video_guider_params,
+            "audio_guider_params": audio_guider_params,
+            "images": images,
+            "tiling_config": tiling_config,
+            "enhance_prompt": enhance_prompt,
+            "streaming_prefetch_count": streaming_prefetch_count,
+            "max_batch_size": max_batch_size,
+        }
+        if self.num_gpus > 1 and not _distributed_env_present():
+            return self._run_distributed_call(call_kwargs)
+
+        self._ensure_ulysses_initialized()
+        return self._call_impl(**call_kwargs)
 
 
 def _build_pipeline_from_args(args: argparse.Namespace) -> TI2VidTwoStagesPipeline:
