@@ -53,6 +53,20 @@ def _normalize_lora(
     raise ValueError(f"Unsupported LoRA specification: {lora!r}")
 
 
+def _normalize_image_input(
+    image: ImageConditioningInput | tuple[str, int, float] | tuple[str, int, float, int],
+) -> ImageConditioningInput:
+    if isinstance(image, ImageConditioningInput):
+        return image
+    if len(image) == 3:
+        path, frame_idx, strength = image
+        return ImageConditioningInput(path=path, frame_idx=frame_idx, strength=strength)
+    if len(image) == 4:
+        path, frame_idx, strength, crf = image
+        return ImageConditioningInput(path=path, frame_idx=frame_idx, strength=strength, crf=crf)
+    raise ValueError(f"Unsupported image conditioning specification: {image!r}")
+
+
 class TI2VidTwoStagesPipeline:
     """
     Two-stage text/image-to-video generation pipeline.
@@ -136,6 +150,7 @@ class TI2VidTwoStagesPipeline:
         max_batch_size: int = 1,
     ) -> tuple[Iterator[torch.Tensor], Audio]:
         assert_resolution(height=height, width=width, is_two_stage=True)
+        images = [_normalize_image_input(image) for image in images]
 
         generator = torch.Generator(device=self.device).manual_seed(seed)
         noiser = GaussianNoiser(generator=generator)
@@ -144,7 +159,7 @@ class TI2VidTwoStagesPipeline:
         ctx_p, ctx_n = self.prompt_encoder(
             [prompt, negative_prompt],
             enhance_first_prompt=enhance_prompt,
-            enhance_prompt_image=images[0][0] if len(images) > 0 else None,
+            enhance_prompt_image=images[0].path if len(images) > 0 else None,
             enhance_prompt_seed=seed,
             streaming_prefetch_count=streaming_prefetch_count,
         )

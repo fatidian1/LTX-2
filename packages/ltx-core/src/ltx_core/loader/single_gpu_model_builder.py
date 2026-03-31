@@ -22,6 +22,20 @@ from ltx_core.model.model_protocol import ModelConfigurator, ModelType
 logger: logging.Logger = logging.getLogger(__name__)
 
 
+def _normalize_lora_spec(
+    lora: LoraPathStrengthAndSDOps | tuple[str, float] | tuple[str, float, SDOps | None],
+) -> LoraPathStrengthAndSDOps:
+    if isinstance(lora, LoraPathStrengthAndSDOps):
+        return lora
+    if len(lora) == 2:
+        path, strength = lora
+        return LoraPathStrengthAndSDOps(path, strength, None)
+    if len(lora) == 3:
+        path, strength, sd_ops = lora
+        return LoraPathStrengthAndSDOps(path, strength, sd_ops)
+    raise ValueError(f"Unsupported LoRA specification: {lora!r}")
+
+
 @dataclass(frozen=True)
 class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType], LoRAAdaptableProtocol):
     """
@@ -60,7 +74,7 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
         return replace(self, module_ops=module_ops)
 
     def with_loras(self, loras: tuple[LoraPathStrengthAndSDOps, ...]) -> "SingleGPUModelBuilder":
-        return replace(self, loras=loras)
+        return replace(self, loras=tuple(_normalize_lora_spec(lora) for lora in loras))
 
     def with_registry(self, registry: Registry) -> "SingleGPUModelBuilder":
         return replace(self, registry=registry)
@@ -110,7 +124,8 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
         model_paths = list(self.model_path) if isinstance(self.model_path, tuple) else [self.model_path]
         model_state_dict = self.load_sd(model_paths, sd_ops=self.model_sd_ops, registry=self.registry, device=device)
 
-        lora_strengths = [lora.strength for lora in self.loras]
+        normalized_loras = tuple(_normalize_lora_spec(lora) for lora in self.loras)
+        lora_strengths = [lora.strength for lora in normalized_loras]
         if not lora_strengths or (min(lora_strengths) == 0 and max(lora_strengths) == 0):
             sd = model_state_dict.sd
             if dtype is not None:
@@ -120,7 +135,7 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
 
         lora_state_dicts = [
             self.load_sd([lora.path], sd_ops=lora.sd_ops, registry=self.registry, device=self.lora_load_device)
-            for lora in self.loras
+            for lora in normalized_loras
         ]
         lora_sd_and_strengths = [
             LoraStateDictWithStrength(sd, strength)
@@ -152,7 +167,8 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
             device=torch.device("cpu"),
         )
 
-        lora_strengths = [lora.strength for lora in self.loras]
+        normalized_loras = tuple(_normalize_lora_spec(lora) for lora in self.loras)
+        lora_strengths = [lora.strength for lora in normalized_loras]
         if not lora_strengths or (min(lora_strengths) == 0 and max(lora_strengths) == 0):
             sd = model_state_dict.sd
             if dtype is not None:
@@ -162,7 +178,7 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
 
         lora_state_dicts = [
             self.load_sd([lora.path], sd_ops=lora.sd_ops, registry=self.registry, device=self.lora_load_device)
-            for lora in self.loras
+            for lora in normalized_loras
         ]
         lora_sd_and_strengths = [
             LoraStateDictWithStrength(sd, strength)
