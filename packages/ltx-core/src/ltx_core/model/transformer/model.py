@@ -199,6 +199,12 @@ class LTXModel(torch.nn.Module):
             return None
         if args.x.device == device:
             return args
+
+        def _move_pe(pe: tuple[torch.Tensor, torch.Tensor] | None) -> tuple[torch.Tensor, torch.Tensor] | None:
+            if pe is None:
+                return None
+            return tuple(item.to(device=device) for item in pe)
+
         return replace(
             args,
             x=args.x.to(device=device),
@@ -206,12 +212,8 @@ class LTXModel(torch.nn.Module):
             context_mask=args.context_mask.to(device=device) if args.context_mask is not None else None,
             timesteps=args.timesteps.to(device=device),
             embedded_timestep=args.embedded_timestep.to(device=device),
-            positional_embeddings=args.positional_embeddings.to(device=device),
-            cross_positional_embeddings=(
-                args.cross_positional_embeddings.to(device=device)
-                if args.cross_positional_embeddings is not None
-                else None
-            ),
+            positional_embeddings=_move_pe(args.positional_embeddings),
+            cross_positional_embeddings=_move_pe(args.cross_positional_embeddings),
             cross_scale_shift_timestep=(
                 args.cross_scale_shift_timestep.to(device=device)
                 if args.cross_scale_shift_timestep is not None
