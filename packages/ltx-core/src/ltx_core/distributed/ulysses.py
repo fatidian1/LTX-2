@@ -16,6 +16,7 @@ class UlyssesState:
     rank: int
     local_rank: int
     device: torch.device
+    device_mesh: object
     attention_callable: object
 
 
@@ -141,12 +142,14 @@ def initialize_ulysses(num_gpus: int, *, attn_type: str = "FA", sync_ulysses: bo
         ring_degree=1,
         ulysses_degree=num_gpus,
     )
+    device_mesh = dist.device_mesh.init_device_mesh("cuda", mesh_shape=(world_size,))
 
     _STATE = UlyssesState(
         world_size=world_size,
         rank=rank,
         local_rank=local_rank,
         device=device,
+        device_mesh=device_mesh,
         attention_callable=_build_attention(attn_type=attn_type, sync_ulysses=sync_ulysses),
     )
     return _STATE
@@ -213,3 +216,7 @@ def shard_rotary_embeddings(
 
 def ulysses_attention_callable() -> object | None:
     return None if _STATE is None else _STATE.attention_callable
+
+
+def ulysses_device_mesh() -> object | None:
+    return None if _STATE is None else _STATE.device_mesh

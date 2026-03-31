@@ -10,7 +10,7 @@ _M = TypeVar("_M", bound=torch.nn.Module)
 
 
 @contextmanager
-def gpu_model(model: _M) -> Iterator[_M]:
+def gpu_model(model: _M, *, release_to_meta: bool = True) -> Iterator[_M]:
     """Context manager that yields a model and releases its memory on exit.
     Moves all parameters and buffers to ``meta`` device on exit, which
     immediately releases the underlying storage on **both** GPU and CPU,
@@ -23,8 +23,10 @@ def gpu_model(model: _M) -> Iterator[_M]:
     try:
         yield model
     finally:
-        torch.cuda.synchronize()
-        # .to("meta") releases storage for all parameters/buffers regardless
-        # of their original device (CUDA or CPU).
-        model.to("meta")
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        if release_to_meta:
+            # .to("meta") releases storage for all parameters/buffers regardless
+            # of their original device (CUDA or CPU).
+            model.to("meta")
         cleanup_memory()

@@ -6,6 +6,7 @@ from ltx_core.distributed.ulysses import (
     shard_rotary_embeddings,
     shard_tensor,
     gather_tensor,
+    ulysses_device_mesh,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "is_ulysses_enabled",
     "shard_rotary_embeddings",
     "shard_tensor",
+    "ulysses_device_mesh",
 ]

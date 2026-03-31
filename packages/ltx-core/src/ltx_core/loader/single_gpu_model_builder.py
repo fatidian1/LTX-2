@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass, field, replace
-from typing import Generic
+from typing import Callable, Generic
 
 import torch
 
@@ -134,3 +134,45 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
         )
         meta_model.load_state_dict(final_sd.sd, strict=False, assign=True)
         return self._return_model(meta_model, device)
+
+    def build_fsdp(
+        self,
+        *,
+        dtype: torch.dtype | None = None,
+        sharder: Callable[[ModelType, dict], ModelType],
+        **kwargs: object,
+    ) -> ModelType:
+        config = self.model_config()
+        meta_model = self.meta_model(config, self.module_ops)
+        model_paths = list(self.model_path) if isinstance(self.model_path, tuple) else [self.model_path]
+        model_state_dict = self.load_sd(
+            model_paths,
+            sd_ops=self.model_sd_ops,
+            registry=self.registry,
+            device=torch.device("cpu"),
+        )
+
+        lora_strengths = [lora.strength for lora in self.loras]
+        if not lora_strengths or (min(lora_strengths) == 0 and max(lora_strengths) == 0):
+            sd = model_state_dict.sd
+            if dtype is not None:
+                sd = {key: value.to(dtype=dtype) for key, value in model_state_dict.sd.items()}
+            meta_model = sharder(meta_model, sd, **kwargs)
+            return meta_model
+
+        lora_state_dicts = [
+            self.load_sd([lora.path], sd_ops=lora.sd_ops, registry=self.registry, device=self.lora_load_device)
+            for lora in self.loras
+        ]
+        lora_sd_and_strengths = [
+            LoraStateDictWithStrength(sd, strength)
+            for sd, strength in zip(lora_state_dicts, lora_strengths, strict=True)
+        ]
+        final_sd = apply_loras(
+            model_sd=model_state_dict,
+            lora_sd_and_strengths=lora_sd_and_strengths,
+            dtype=dtype,
+            destination_sd=model_state_dict if isinstance(self.registry, DummyRegistry) else None,
+        )
+        meta_model = sharder(meta_model, final_sd.sd, **kwargs)
+        return meta_model
